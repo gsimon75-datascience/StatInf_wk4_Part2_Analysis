@@ -1,0 +1,200 @@
+---
+title: |
+ | Statistical Inference
+ | Simulation of the Exponential Distribution
+author: "Gabor Simon"
+output: 
+  pdf_document:
+          toc: true
+---
+
+
+## Overview
+
+We are investigating the exponential distribution and the way the Central Limit Theorem
+applies to it.
+
+For this, we use an exponential distribution with a rate parameter of $\lambda$ = 0.2,
+we take 40 samples in each simulation step, and we perform 1000 simulations.
+
+A quick intro for the exponential distribution can be found on [Wikipedia](https://en.wikipedia.org/wiki/Exponential_distribution),
+but the most important for us now is that
+
+* its mean is $\mu = \frac{1}{\lambda}$ (in our case 1 / 0.2 = 5) and 
+* its standard deviation is also $\sigma = \frac{1}{\lambda}$ (in our case also 5), so
+* its variance is the square of that $\sigma^{2} = \frac{1}{\lambda^{2}}$, (in our case $5^{2} = 25$)
+
+
+So, our R code begins with setting the parameters:
+```{r set_params, message = FALSE}
+library(ggplot2)
+# We want the same data on each run
+set.seed(1507446545)
+
+# For all simulations, the parameter of the exponential is this value
+lambda <- 0.2
+
+# We take sets of this many samples
+n_samples <- 40
+
+# Number of simulations
+n_simulations <- 1000
+```
+
+
+## Simulations
+To simulate a phenomenon that behaves according to an exponential distribution, we 
+generate a lot of random numbers by using the `rexp()` function.
+
+We arrange these values in a matrix, where each row represents a simulation,
+so this matrix has as many columns as many samples we take in one simulation.
+
+```{r generate_data, message = FALSE}
+# Each row represents a simulation of `n_samples` samples
+samples <- matrix(rexp(n_samples * n_simulations, rate = lambda),
+		  nrow = n_simulations)
+dim(samples)
+
+# Now we calculate the means of the samples
+sample_means <- apply(samples, 1, mean)
+head(sample_means)
+
+# And we can plot their histogram
+g_hist <- geom_histogram(aes(sample_means),
+			 bins = 30,
+			 colour = "black",
+			 fill = "white")
+g_pop_mean <- geom_vline(xintercept = 1 / lambda,
+			 colour = "blue")
+
+ggplot() +
+	g_hist +
+	g_pop_mean +
+	labs(title = "Sample mean", x = "mean value", y = "frequency")
+```
+
+The histogram above shows the frequencies of the *sample* means, at first glance it looks like kind of a
+normal distribution that is centered around the supposed population mean 5 (blue line).
+
+
+## Sample Mean vs. Theoretical Mean
+To get more accurate parameters about the distribution of the sample means, let's check their mean first:
+```{r mean_of_sample_means, message = FALSE}
+mx = mean(sample_means)
+mx
+```
+
+So the means are indeed centered around 5, which they should be according to the Central Limit Theorem:
+
+*The means of the sample means estimate the population mean*
+
+In our case, the value around 5 above estimates $\mu = 5$.
+
+
+## Sample Variance vs. Theoretical Variance
+To continue checking the distribution of the sample means, let's check their variance as well:
+
+```{r var_of_sample_means, message = FALSE}
+vx = var(sample_means)
+vx
+```
+
+The means have a variance about 0.63 (so their standard deviation is about 0.8).
+
+According to the Central Limit Theorem:
+
+*The variance of the sample means estimate the population variance divided by the sample size.*
+
+In our case, the value around 0.63 above estimates $\frac{\sigma^{2}}{n_{samples}} = \frac{25}{40} = 0.625$, which is quite close.
+
+## Distribution of the Means
+
+If we approximate the *probability* of getting a mean less than a limit by the
+*ratio* of such means among our simulations, then we can define the distribution
+function of the sample means:
+
+```{r dist_fn_of_sample_means, message = FALSE}
+psm <- Vectorize(function(x) sum(sample_means < x) / n_simulations)
+```
+ 
+We suspect that this distribution approximates $Z(mean=1/\lambda, sd=\frac{1/\lambda}{\sqrt{n_{samples}}})$:
+
+```{r compare_dist_fns, message = FALSE}
+
+g_psm <- stat_function(fun = psm,
+		       aes(colour = "Actual"))
+
+g_norm <- stat_function(fun = function(x) pnorm(x,
+						mean = 1/lambda,
+						sd = 1/lambda / sqrt(n_samples)),
+			aes(colour = "Normal"))
+
+ggplot(data = data.frame(x = 0), mapping = aes(x = x)) +
+	xlim(2, 8) + ylim(0, 1) +
+	g_psm + g_norm +
+	labs(title = "Distribution functions", x = "x", y = "P(mean < x)") +
+	scale_colour_manual("Dist. fn.",
+			    values = c("Actual" = "red", "Normal" = "blue"))
+```
+
+It seems to fit but how closely? As the distribution of the means is somewhat
+mound-shaped, we may calculate a p-value by using a classic 'treated vs. placebo' t-test,
+where our mean values are the 'treated' set, and a normal distribution is the the 'placebo'.
+
+Our null hypothesis is that the means follow the Central Limit Theorem, that is,
+they are $Z(mean=1/\lambda, sd=(1/\lambda)/\sqrt{n_{samples}})$.
+
+```{r p_value, message = TRUE}
+# The parameters of the 'treated' set:
+mx <- mx
+sx <- sqrt(vx)
+nx <- n_simulations
+c(mx, sx, nx)
+
+# The parameters of the 'placebo' set:
+my <- 1/lambda
+sy <- 1/lambda / sqrt(n_samples)
+ny <- n_simulations # same size
+c(my, sy, ny)
+
+# The pooled variance estimator:
+sp <- sqrt( ((nx-1)*sx^2 + (ny-1)*sy^2) / (nx + ny - 2) )
+sp
+
+# The test statistic:
+ts <- (mx - my) / (sp * sqrt(1/nx + 1/ny))
+ts
+
+# The p-value:
+# (Checking for both tails around the confidence interval, so calculate the
+# left tail and double it, because the right tail covers the same.)
+p <- 2 * pt(-abs(ts), nx + ny - 2)
+p
+```
+This p-value is definitely high enough, it means that according to the null hypothesis it is
+quite likely to get this result, so we **fail to reject** the null hypothesis, so we may
+assume that the means indeed follow the Central Limit Theorem.
+
+## Distribution of the Exponentials
+
+It is important that it is the **sample means** that converge to a normal distribution,
+although the original data follows the exponential. To demonstrate this, here is the
+histogram of the same original data:
+
+```{r orig_histogram, message = TRUE}
+g_hist <- geom_histogram(aes(as.vector(samples)),
+			 bins = 30,
+			 colour = "black",
+			 fill = "white")
+g_pop_mean <- geom_vline(xintercept = 1 / lambda,
+			 colour = "blue")
+
+ggplot() +
+	g_hist +
+	g_pop_mean +
+	labs(title = "Original (exponentially distributed) data", x = "mean value", y = "frequency")
+```
+
+
+
+
