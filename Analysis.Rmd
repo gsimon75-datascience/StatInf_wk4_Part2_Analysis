@@ -8,7 +8,6 @@ output:
           toc: true
 ---
 
-
 ## Overview
 
 We are doing an Inferential Data Analysis on the ToothGrowth dataset of the
@@ -39,6 +38,8 @@ The built-in help of the dataset says:
 >            [,3]  dose  numeric  Dose in milligrams/day      
 >     ...
 
+\pagebreak
+
 ## Exploratory Data Analysis
 
 To get some first-glance ideas, let's take a look at the data.
@@ -47,6 +48,7 @@ To get some first-glance ideas, let's take a look at the data.
 ```{r eda_1, message = FALSE}
 ggplot(ToothGrowth, aes(factor(dose), len)) + facet_grid(~supp) + geom_boxplot()
 ```
+\pagebreak
 
 ### The individual sample distributions for each (dose,supp) pair
 ```{r eda_2, message = FALSE}
@@ -58,8 +60,9 @@ ggplot(ToothGrowth, aes(len)) + facet_grid(dose~supp) + geom_histogram(bins=20)
 2. For 0.5 and 1.0 mg/day, the 'OJ' supplement results longer teeth than the 'VC'
 3. For 2.0 mg/day, the difference is insignificant
 4. Due to the low number of samples, the distributions are not recognisable
-   as normals, but they aren't that sloped either.
+   as normals, but they aren't too sloped either.
 
+\pagebreak
 
 ## Basic Inferential Data Analysis
 
@@ -76,49 +79,63 @@ The following wrapper functions make such tests easier:
 
 ```{r test_wrapper, message = FALSE}
 
-# Test whether the tooth length in case of {dose,supp}A is greater than for {dose,supp}0
-# H0: len(dose0, supp0) = len(doseA, suppA)
-# HA: len(dose0, supp0) < len(doseA, suppA)
-# If the p-value is low enough, then H0 can be rejected and HA may be assumed true
-# If the p-value is too high, then we failed to reject H0
-test_tg <- function(dose0, supp0, doseA, suppA) {
-	t.test(ToothGrowth$len[ToothGrowth$dose == doseA & ToothGrowth$supp == suppA],
-	       ToothGrowth$len[ToothGrowth$dose == dose0 & ToothGrowth$supp == supp0], alternative="greater")
-}
+# We collect the alternative hypotheses here for p-adjustment
+hypotheses <- vector()
 
-# Test the two {dose,supp}{0,A} pairs in both directions and print the p-values
-test_and_print <- function(dose0, supp0, doseA, suppA) {
-	descr_fwd <- paste("HA={ (", doseA, ",", suppA, ") more effective than (", dose0, ",", supp0, ") }", sep = "")
-	print(paste(descr_fwd, test_tg(dose0, supp0, doseA, suppA)$p.value))
-	descr_rev <- paste("HA={ (", dose0, ",", supp0, ") more effective than (", doseA, ",", suppA, ") }", sep = "")
-	print(paste(descr_rev, test_tg(doseA, suppA, dose0, supp0)$p.value))
-	#print(paste("HA={ (", doseA, ",", suppA, ") more effective than (", dose0, ",", supp0, ") }: ", test_tg(dose0, supp0, doseA, suppA)$p.value, sep = ""))
-	#print(paste("HA={ (", dose0, ",", supp0, ") more effective than (", doseA, ",", suppA, ") }: ", test_tg(doseA, suppA, dose0, supp0)$p.value, sep = ""))
+# Test whether the tooth length in case of {dose,supp}A is greater than for {dose,supp}0
+# and collect the p-values in the @hypotheses vector, because we'll have to do p-adjustment
+# on them before printing
+test_and_collect <- function(dose0, supp0, doseA, suppA) {
+	description <- paste("(", doseA, ",", suppA, ")",
+			     " more effective than ",
+			     "(", dose0, ",", supp0, ")",
+			     sep = "")
+
+	# H0: len(dose0, supp0) = len(doseA, suppA)
+	# HA: len(dose0, supp0) < len(doseA, suppA)
+	# If the p-value is low enough, then H0 can be rejected and HA may be assumed true
+	# If the p-value is too high, then we failed to reject H0
+	p <- t.test(ToothGrowth$len[ToothGrowth$dose == doseA & ToothGrowth$supp == suppA],
+		    ToothGrowth$len[ToothGrowth$dose == dose0 & ToothGrowth$supp == supp0],
+		    alternative = "greater")$p.value
+
+	hypotheses[description] <<- p
 }
 
 # Check whether OJ > VC with @dose, or the opposite, or neither
 test_dose <- function(dose) {
-	test_and_print(dose, "VC", dose, "OJ")
+	hypotheses <<- vector()
+	test_and_collect(dose, "VC", dose, "OJ")
+	test_and_collect(dose, "OJ", dose, "VC")
+	hypotheses <<- p.adjust(hypotheses, method = "BH")
+	for (h in names(hypotheses))
+		print(paste("HA={", h, "}:", hypotheses[h]))
 }
 
 # Check whether 2.0 > 1.0 > 0.5 for @supp, or the opposite, or neither
 test_supplement <- function(supp) {
-	test_and_print(0.5, supp, 1.0, supp)
-	test_and_print(1.0, supp, 2.0, supp)
+	hypotheses <<- vector()
+	test_and_collect(0.5, supp, 1.0, supp)
+	test_and_collect(1.0, supp, 0.5, supp)
+	test_and_collect(1.0, supp, 2.0, supp)
+	test_and_collect(2.0, supp, 1.0, supp)
+	hypotheses <<- p.adjust(hypotheses, method = "BH")
+	for (h in names(hypotheses))
+		print(paste("HA={", h, "}:", hypotheses[h]))
 }
 ```
 
-### The p-values for our hypotheses!
+### The p-values for our hypotheses
 
 Remember, for all the following tests the null hypothesis H0 is that
 both (dose,supp) pairs are equally efficient, and if a **p-value is low enough**, then
-that we reject this H0 and **accept HA as true**.
+can we reject this H0 and **accept HA as true**.
 
-### Testing hypothesis about doses
+### Testing hypotheses about doses
 
 For each dose we have two alternative hypotheses ("VC > OJ" and "OJ > VC"),
-so we can even afford a Bonferroni correction and simply choose an $\alpha$ half
-of what we originally wanted.
+so a Benjamini-Hochberg is not definitely needed, but we will need it anyway later,
+so we are performing it by default.
 
 ```{r test_dose_hypotheses, message = FALSE}
 test_dose(0.5)
@@ -126,9 +143,12 @@ test_dose(1.0)
 test_dose(2.0)
 ```
 
-\pagebreak
+### Testing hypotheses about supplements
 
-### Testing hypothesis about supplements
+For the supplement types we have 4 hypotheses (in fact, we could
+check for all 6 permutations of ordering the 3 dosages, making it 12 one-sided tests),
+so a Bonferroni correction would cost us a whole magnitude of $\alpha$,
+so here a B-H correction is a must.
 
 ```{r test_supp_hypotheses, message = FALSE}
 test_supplement("VC")
@@ -137,8 +157,12 @@ test_supplement("OJ")
 
 
 ## Conclusions
+1. For doses 0.5 and 1.0 mg/day, "OJ" is more effective than "VC" ($\alpha < 0.0064$)
+2. For 2.0 mg/day there is no significant difference between the supplements' effectiveness.
+3. For both supplement types a higher dose is more effective ($\alpha < 0.04$)
 
-1. For both supplement type the higher dose is more effective ($\alpha < 0.02$)
-2. For doses 0.5 and 1.0 mg/day, "OJ" is more effective than "VC" ($\alpha < 0.0032$)
-3. For 2.0 mg/day there is no significant difference between the supplements' effectiveness.
+During the process we relied on a set of assumptions:
 
+* The effects of the supplement and of the dosage are independent
+* The effects of the dosage are monotone (either increasing or decreasing)
+* The individual distributions of the (dose,supp) pairs are valid for applying t-tests
