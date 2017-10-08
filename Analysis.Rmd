@@ -1,7 +1,7 @@
 ---
 title: |
  | Statistical Inference
- | Simulation of the Exponential Distribution
+ | Analysis of the ToothGrowth data
 author: "Gabor Simon"
 output: 
   pdf_document:
@@ -11,190 +11,134 @@ output:
 
 ## Overview
 
-We are investigating the exponential distribution and the way the Central Limit Theorem
-applies to it.
+We are doing an Inferential Data Analysis on the ToothGrowth dataset of the
+R library 'datasets': "The Effect of Vitamin C on Tooth Growth in Guinea Pigs".
 
-For this, we use an exponential distribution with a rate parameter of $\lambda$ = 0.2,
-we take 40 samples in each simulation step, and we perform 1000 simulations.
-
-A quick intro for the exponential distribution can be found on [Wikipedia](https://en.wikipedia.org/wiki/Exponential_distribution),
-but the most important for us now is that
-
-* its mean is $\mu = \frac{1}{\lambda}$ (in our case 1 / 0.2 = 5) and 
-* its standard deviation is also $\sigma = \frac{1}{\lambda}$ (in our case also 5), so
-* its variance is the square of that $\sigma^{2} = \frac{1}{\lambda^{2}}$, (in our case $5^{2} = 25$)
-
-
-So, our R code begins with setting the parameters:
-```{r set_params, message = FALSE}
+```{r setup_environment, message = FALSE}
+library(datasets)
+library(dplyr)
 library(ggplot2)
 # We want the same data on each run
-set.seed(1507446545)
+set.seed(1507471380)
+```
 
-# For all simulations, the parameter of the exponential is this value
-lambda <- 0.2
+The built-in help of the dataset says:
 
-# We take sets of this many samples
-n_samples <- 40
+>     ...
+>     Description:
+>          The response is the length of odontoblasts (cells responsible for
+>          tooth growth) in 60 guinea pigs.  Each animal received one of
+>          three dose levels of vitamin C (0.5, 1, and 2 mg/day) by one of
+>          two delivery supplements, (orange juice or ascorbic acid (a form of
+>          vitamin C and coded as 'VC').
+>     
+>     Format:
+>          A data frame with 60 observations on 3 variables.
+>            [,1]  len   numeric  Tooth length                
+>            [,2]  supp  factor   Supplement type (VC or OJ). 
+>            [,3]  dose  numeric  Dose in milligrams/day      
+>     ...
 
-# Number of simulations
-n_simulations <- 1000
+## Exploratory Data Analysis
+
+To get some first-glance ideas, let's take a look at the data.
+
+### The tooth length distributions by dose and supplement type
+```{r eda_1, message = FALSE}
+ggplot(ToothGrowth, aes(factor(dose), len)) + facet_grid(~supp) + geom_boxplot()
+```
+
+### The individual sample distributions for each (dose,supp) pair
+```{r eda_2, message = FALSE}
+ggplot(ToothGrowth, aes(len)) + facet_grid(dose~supp) + geom_histogram(bins=20)
+```
+
+### Our approximate observations
+1. For both supplements, higher doses result longer teeth
+2. For 0.5 and 1.0 mg/day, the 'OJ' supplement results longer teeth than the 'VC'
+3. For 2.0 mg/day, the difference is insignificant
+4. Due to the low number of samples, the distributions are not recognisable
+   as normals, but they aren't that sloped either.
+
+
+## Basic Inferential Data Analysis
+
+So our null hypotheses will be that all dosages and supplements result the same
+tooth growth, and the alternative hypotheses will be that one (dose,supp) pair
+results more than the other.
+
+This will give us quite a number of hypotheses, so the pitfalls of multiple
+testing shall be considered as well.
+
+As we cannot assume the distributions to be normal, we resort to t-tests.
+
+The following wrapper functions make such tests easier:
+
+```{r test_wrapper, message = FALSE}
+
+# Test whether the tooth length in case of {dose,supp}A is greater than for {dose,supp}0
+# H0: len(dose0, supp0) = len(doseA, suppA)
+# HA: len(dose0, supp0) < len(doseA, suppA)
+# If the p-value is low enough, then H0 can be rejected and HA may be assumed true
+# If the p-value is too high, then we failed to reject H0
+test_tg <- function(dose0, supp0, doseA, suppA) {
+	t.test(ToothGrowth$len[ToothGrowth$dose == doseA & ToothGrowth$supp == suppA],
+	       ToothGrowth$len[ToothGrowth$dose == dose0 & ToothGrowth$supp == supp0], alternative="greater")
+}
+
+# Test the two {dose,supp}{0,A} pairs in both directions and print the p-values
+test_and_print <- function(dose0, supp0, doseA, suppA) {
+	descr_fwd <- paste("HA={ (", doseA, ",", suppA, ") more effective than (", dose0, ",", supp0, ") }", sep = "")
+	print(paste(descr_fwd, test_tg(dose0, supp0, doseA, suppA)$p.value))
+	descr_rev <- paste("HA={ (", dose0, ",", supp0, ") more effective than (", doseA, ",", suppA, ") }", sep = "")
+	print(paste(descr_rev, test_tg(doseA, suppA, dose0, supp0)$p.value))
+	#print(paste("HA={ (", doseA, ",", suppA, ") more effective than (", dose0, ",", supp0, ") }: ", test_tg(dose0, supp0, doseA, suppA)$p.value, sep = ""))
+	#print(paste("HA={ (", dose0, ",", supp0, ") more effective than (", doseA, ",", suppA, ") }: ", test_tg(doseA, suppA, dose0, supp0)$p.value, sep = ""))
+}
+
+# Check whether OJ > VC with @dose, or the opposite, or neither
+test_dose <- function(dose) {
+	test_and_print(dose, "VC", dose, "OJ")
+}
+
+# Check whether 2.0 > 1.0 > 0.5 for @supp, or the opposite, or neither
+test_supplement <- function(supp) {
+	test_and_print(0.5, supp, 1.0, supp)
+	test_and_print(1.0, supp, 2.0, supp)
+}
+```
+
+### The p-values for our hypotheses!
+
+Remember, for all the following tests the null hypothesis H0 is that
+both (dose,supp) pairs are equally efficient, and if a **p-value is low enough**, then
+that we reject this H0 and **accept HA as true**.
+
+### Testing hypothesis about doses
+
+For each dose we have two alternative hypotheses ("VC > OJ" and "OJ > VC"),
+so we can even afford a Bonferroni correction and simply choose an $\alpha$ half
+of what we originally wanted.
+
+```{r test_dose_hypotheses, message = FALSE}
+test_dose(0.5)
+test_dose(1.0)
+test_dose(2.0)
+```
+
+\pagebreak
+
+### Testing hypothesis about supplements
+
+```{r test_supp_hypotheses, message = FALSE}
+test_supplement("VC")
+test_supplement("OJ")
 ```
 
 
-## Simulations
-To simulate a phenomenon that behaves according to an exponential distribution, we 
-generate a lot of random numbers by using the `rexp()` function.
+## Conclusions
 
-We arrange these values in a matrix, where each row represents a simulation,
-so this matrix has as many columns as many samples we take in one simulation.
-
-```{r generate_data, message = FALSE}
-# Each row represents a simulation of `n_samples` samples
-samples <- matrix(rexp(n_samples * n_simulations, rate = lambda),
-		  nrow = n_simulations)
-dim(samples)
-
-# Now we calculate the means of the samples
-sample_means <- apply(samples, 1, mean)
-head(sample_means)
-
-# And we can plot their histogram
-g_hist <- geom_histogram(aes(sample_means),
-			 bins = 30,
-			 colour = "black",
-			 fill = "white")
-g_pop_mean <- geom_vline(xintercept = 1 / lambda,
-			 colour = "blue")
-
-ggplot() +
-	g_hist +
-	g_pop_mean +
-	labs(title = "Sample mean", x = "mean value", y = "frequency")
-```
-
-The histogram above shows the frequencies of the *sample* means, at first glance it looks like kind of a
-normal distribution that is centered around the supposed population mean 5 (blue line).
-
-
-## Sample Mean vs. Theoretical Mean
-To get more accurate parameters about the distribution of the sample means, let's check their mean first:
-```{r mean_of_sample_means, message = FALSE}
-mx = mean(sample_means)
-mx
-```
-
-So the means are indeed centered around 5, which they should be according to the Central Limit Theorem:
-
-*The means of the sample means estimate the population mean*
-
-In our case, the value around 5 above estimates $\mu = 5$.
-
-
-## Sample Variance vs. Theoretical Variance
-To continue checking the distribution of the sample means, let's check their variance as well:
-
-```{r var_of_sample_means, message = FALSE}
-vx = var(sample_means)
-vx
-```
-
-The means have a variance about 0.63 (so their standard deviation is about 0.8).
-
-According to the Central Limit Theorem:
-
-*The variance of the sample means estimate the population variance divided by the sample size.*
-
-In our case, the value around 0.63 above estimates $\frac{\sigma^{2}}{n_{samples}} = \frac{25}{40} = 0.625$, which is quite close.
-
-## Distribution of the Means
-
-If we approximate the *probability* of getting a mean less than a limit by the
-*ratio* of such means among our simulations, then we can define the distribution
-function of the sample means:
-
-```{r dist_fn_of_sample_means, message = FALSE}
-psm <- Vectorize(function(x) sum(sample_means < x) / n_simulations)
-```
- 
-We suspect that this distribution approximates $Z(mean=1/\lambda, sd=\frac{1/\lambda}{\sqrt{n_{samples}}})$:
-
-```{r compare_dist_fns, message = FALSE}
-
-g_psm <- stat_function(fun = psm,
-		       aes(colour = "Actual"))
-
-g_norm <- stat_function(fun = function(x) pnorm(x,
-						mean = 1/lambda,
-						sd = 1/lambda / sqrt(n_samples)),
-			aes(colour = "Normal"))
-
-ggplot(data = data.frame(x = 0), mapping = aes(x = x)) +
-	xlim(2, 8) + ylim(0, 1) +
-	g_psm + g_norm +
-	labs(title = "Distribution functions", x = "x", y = "P(mean < x)") +
-	scale_colour_manual("Dist. fn.",
-			    values = c("Actual" = "red", "Normal" = "blue"))
-```
-
-It seems to fit but how closely? As the distribution of the means is somewhat
-mound-shaped, we may calculate a p-value by using a classic 'treated vs. placebo' t-test,
-where our mean values are the 'treated' set, and a normal distribution is the the 'placebo'.
-
-Our null hypothesis is that the means follow the Central Limit Theorem, that is,
-they are $Z(mean=1/\lambda, sd=(1/\lambda)/\sqrt{n_{samples}})$.
-
-```{r p_value, message = TRUE}
-# The parameters of the 'treated' set:
-mx <- mx
-sx <- sqrt(vx)
-nx <- n_simulations
-c(mx, sx, nx)
-
-# The parameters of the 'placebo' set:
-my <- 1/lambda
-sy <- 1/lambda / sqrt(n_samples)
-ny <- n_simulations # same size
-c(my, sy, ny)
-
-# The pooled variance estimator:
-sp <- sqrt( ((nx-1)*sx^2 + (ny-1)*sy^2) / (nx + ny - 2) )
-sp
-
-# The test statistic:
-ts <- (mx - my) / (sp * sqrt(1/nx + 1/ny))
-ts
-
-# The p-value:
-# (Checking for both tails around the confidence interval, so calculate the
-# left tail and double it, because the right tail covers the same.)
-p <- 2 * pt(-abs(ts), nx + ny - 2)
-p
-```
-This p-value is definitely high enough, it means that according to the null hypothesis it is
-quite likely to get this result, so we **fail to reject** the null hypothesis, so we may
-assume that the means indeed follow the Central Limit Theorem.
-
-## Distribution of the Exponentials
-
-It is important that it is the **sample means** that converge to a normal distribution,
-although the original data follows the exponential. To demonstrate this, here is the
-histogram of the same original data:
-
-```{r orig_histogram, message = TRUE}
-g_hist <- geom_histogram(aes(as.vector(samples)),
-			 bins = 30,
-			 colour = "black",
-			 fill = "white")
-g_pop_mean <- geom_vline(xintercept = 1 / lambda,
-			 colour = "blue")
-
-ggplot() +
-	g_hist +
-	g_pop_mean +
-	labs(title = "Original (exponentially distributed) data", x = "mean value", y = "frequency")
-```
-
-
-
+1. For both supplement type the higher dose is more effective ($\alpha < 0.02$)
+2. For doses 0.5 and 1.0 mg/day, "OJ" is more effective than "VC" ($\alpha < 0.0032$)
+3. For 2.0 mg/day there is no significant difference between the supplements' effectiveness.
 
